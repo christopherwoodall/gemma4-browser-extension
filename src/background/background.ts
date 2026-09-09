@@ -1,3 +1,4 @@
+import "./setupOrt.ts";
 import { ModelRegistry } from "@huggingface/transformers";
 
 import { MODELS, REQUIRED_MODEL_IDS } from "../shared/constants.ts";
@@ -202,11 +203,13 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   return false;
 });
 
-chrome.action.onClicked.addListener(async (tab) => {
-  if (tab.id) {
-    await chrome.sidePanel.open({ tabId: tab.id });
-  }
-});
+if (typeof chrome !== "undefined" && chrome.sidePanel?.open) {
+  chrome.action.onClicked.addListener(async (tab) => {
+    if (tab.id) {
+      await chrome.sidePanel.open({ tabId: tab.id });
+    }
+  });
+}
 
 const addCurrentPageToVectorHistory = async (tabId: number, tab: Tab) => {
   const title = tab.title || "Untitled";

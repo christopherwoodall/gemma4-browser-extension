@@ -54,14 +54,24 @@ pnpm install
 
 3. Build the extension:
 ```bash
+# Build for both Chrome and Firefox
 pnpm run build
+
+# Or build for a specific target:
+pnpm run build:chrome   # Outputs to dist/chrome
+pnpm run build:firefox  # Outputs to dist/firefox
 ```
 
-4. Load in Chrome:
-   - Open `chrome://extensions/`
-   - Enable "Developer mode"
-   - Click "Load unpacked"
-   - Select the `dist` folder
+4. Load in Browser:
+   - **Chrome**:
+     - Open `chrome://extensions/`
+     - Enable "Developer mode"
+     - Click "Load unpacked"
+     - Select the `dist/chrome` folder
+   - **Firefox**:
+     - Open `about:debugging#/runtime/this-firefox`
+     - Click "Load Temporary Add-on..."
+     - Select the `dist/firefox/manifest.json` file
 
 #### Development Mode
 
