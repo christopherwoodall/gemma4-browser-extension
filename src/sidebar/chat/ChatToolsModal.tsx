@@ -39,6 +39,14 @@ const toolMetadata: Record<ToolName, { label: string; description: string }> = {
     label: "Highlight Website Element",
     description: "Highlight elements on a webpage",
   },
+  [AvailableTools.EXECUTE_JAVASCRIPT]: {
+    label: "Execute JavaScript",
+    description: "Run custom JavaScript directly on the active webpage",
+  },
+  [AvailableTools.CAPTURE_WEB_TRAFFIC]: {
+    label: "Capture Web Traffic",
+    description: "Inspect recent network requests made by the tab",
+  },
 };
 
 export default function ChatToolsModal({

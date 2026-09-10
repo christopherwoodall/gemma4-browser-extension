@@ -1,9 +1,26 @@
 import {
   DynamicCache,
+  StoppingCriteria,
   TextGenerationPipeline,
   TextStreamer,
   pipeline,
 } from "@huggingface/transformers";
+
+class InterruptableStoppingCriteria extends StoppingCriteria {
+  public interrupted: boolean = false;
+
+  public interrupt() {
+    this.interrupted = true;
+  }
+
+  public reset() {
+    this.interrupted = false;
+  }
+
+  public _call(input_ids: any): boolean[] {
+    return new Array(input_ids?.length || 1).fill(this.interrupted);
+  }
+}
 
 import { MODELS, TEXT_GENERATION_ID } from "../../shared/constants.ts";
 import {
@@ -11,6 +28,7 @@ import {
   ChatMessage,
   ChatMessageAssistant,
 } from "../../shared/types.ts";
+import { formatOrtError, isWebGpuSupported } from "../utils/deviceHelper.ts";
 import { extractToolCalls } from "./extractToolCalls.ts";
 import { ToolCallPayload } from "./types.ts";
 import {
@@ -49,11 +67,18 @@ const getTextGenerationPipeline = async (
 ): Promise<TextGenerationPipeline> => {
   if (pipe) return pipe;
 
+  const m = MODELS[TEXT_GENERATION_ID];
+  const hasWebGpu = await isWebGpuSupported();
+  const preferredDevice = hasWebGpu ? "webgpu" : "wasm";
+  const preferredDtype = preferredDevice === "webgpu" ? m.dtype : "q4";
+
   try {
-    const m = MODELS[TEXT_GENERATION_ID];
+    console.log(
+      `[Agent] Initializing text generation pipeline with device: ${preferredDevice}, dtype: ${preferredDtype}`
+    );
     pipe = (await pipeline("text-generation", m.modelId, {
-      dtype: m.dtype,
-      device: "webgpu",
+      dtype: preferredDtype,
+      device: preferredDevice,
       progress_callback: (i) => {
         if (i.status === "progress_total") {
           onDownloadProgress(m.modelId, i.progress);
@@ -62,9 +87,33 @@ const getTextGenerationPipeline = async (
     })) as TextGenerationPipeline;
 
     return pipe;
-  } catch (error) {
-    console.error("Failed to initialize text generation pipeline:", error);
-    throw error;
+  } catch (primaryError) {
+    if (preferredDevice === "webgpu") {
+      console.warn(
+        "[Agent] Failed to initialize text generation on WebGPU, falling back to wasm (q4):",
+        formatOrtError(primaryError)
+      );
+      try {
+        pipe = (await pipeline("text-generation", m.modelId, {
+          dtype: "q4",
+          device: "wasm",
+          progress_callback: (i) => {
+            if (i.status === "progress_total") {
+              onDownloadProgress(m.modelId, i.progress);
+            }
+          },
+        })) as TextGenerationPipeline;
+        return pipe;
+      } catch (fallbackError) {
+        const formatted = formatOrtError(fallbackError, "Agent:wasm-fallback");
+        console.error("Failed to initialize text generation pipeline (wasm fallback):", formatted);
+        throw formatted;
+      }
+    }
+
+    const formatted = formatOrtError(primaryError, "Agent");
+    console.error("Failed to initialize text generation pipeline:", formatted);
+    throw formatted;
   }
 };
 
@@ -76,8 +125,16 @@ class Agent {
     (chatMessages: Array<ChatMessage>) => void
   > = [];
   private tools: Array<WebMCPTool> = [];
+  private stoppingCriteria: InterruptableStoppingCriteria =
+    new InterruptableStoppingCriteria();
+  private isInterrupted: boolean = false;
 
   constructor() {}
+
+  public stop() {
+    this.isInterrupted = true;
+    this.stoppingCriteria.interrupt();
+  }
 
   get chatMessages() {
     return this._chatMessages;
@@ -153,6 +210,7 @@ class Agent {
       max_new_tokens: 1024,
       do_sample: false,
       streamer,
+      stopping_criteria: [this.stoppingCriteria],
     });
 
     const promptLength = Number(input.input_ids.dims.at(-1) ?? 0);
@@ -233,6 +291,9 @@ class Agent {
   };
 
   public runAgent = async (prompt: string): Promise<AgentRunMetrics> => {
+    this.isInterrupted = false;
+    this.stoppingCriteria.reset();
+
     let roleForGeneration: "user" | "tool" = "user";
     let appendPromptMessage = true;
     const start = performance.now();
@@ -290,6 +351,14 @@ class Agent {
     };
 
     while (prompt !== null) {
+      if (this.isInterrupted) {
+        assistantMessage.content = (
+          assistantMessage.content + " [Generation stopped]"
+        ).trim();
+        this.chatMessages = [...prevChatMessages, assistantMessage];
+        break;
+      }
+
       const generation = await this.generateText(
         prompt,
         roleForGeneration,
@@ -315,6 +384,14 @@ class Agent {
         msPerToken: generatedTokens > 0 ? decodeMs / generatedTokens : 0,
       };
 
+      if (this.isInterrupted) {
+        assistantMessage.content = (
+          assistantMessage.content + " [Generation stopped]"
+        ).trim();
+        this.chatMessages = [...prevChatMessages, assistantMessage];
+        break;
+      }
+
       const { toolCalls, message } = extractToolCalls(finalResponse);
       messageInThisAgentRun = message;
 
@@ -324,6 +401,14 @@ class Agent {
         const toolResponses = await Promise.all(
           toolCalls.map(this.executeToolCall)
         );
+
+        if (this.isInterrupted) {
+          assistantMessage.content = (
+            assistantMessage.content + " [Generation stopped]"
+          ).trim();
+          this.chatMessages = [...prevChatMessages, assistantMessage];
+          break;
+        }
 
         for (let i = this.messages.length - 1; i >= 0; i -= 1) {
           if (this.messages[i].role === "assistant") {

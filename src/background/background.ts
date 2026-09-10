@@ -13,6 +13,11 @@ import {
   createAskWebsiteTool,
   highlightWebsiteElementTool,
 } from "./tools/askWebsite.ts";
+import {
+  createCaptureWebTrafficTool,
+  getNetworkTrafficManager,
+} from "./tools/captureTraffic.ts";
+import { executeJavaScriptTool } from "./tools/executeJavaScript.ts";
 //import { googleSearchTool } from "./tools/search.ts";
 import {
   closeTabTool,
@@ -40,6 +45,7 @@ const onModelDownloadProgress = (modelId: string, percentage: number) => {
 
 const featureExtractor = new FeatureExtractor();
 const vectorHistory = new VectorHistory(featureExtractor);
+const networkTrafficManager = getNetworkTrafficManager();
 let currentAgent: Agent | null = null;
 
 const availableTools: Record<string, () => any> = {
@@ -50,6 +56,9 @@ const availableTools: Record<string, () => any> = {
   [AvailableTools.FIND_HISTORY]: () => vectorHistory.findHistoryTool,
   [AvailableTools.ASK_WEBSITE]: () => createAskWebsiteTool(featureExtractor),
   [AvailableTools.HIGHLIGHT_WEBSITE_ELEMENT]: () => highlightWebsiteElementTool,
+  [AvailableTools.EXECUTE_JAVASCRIPT]: () => executeJavaScriptTool,
+  [AvailableTools.CAPTURE_WEB_TRAFFIC]: () =>
+    createCaptureWebTrafficTool(networkTrafficManager),
   //[AvailableTools.GOOGLE_SEARCH]: () => googleSearchTool,
 };
 
@@ -182,6 +191,13 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === BackgroundTasks.AGENT_CLEAR) {
     const agent = getAgent();
     agent.clear();
+    sendResponse({ status: ResponseStatus.SUCCESS });
+    return true;
+  }
+
+  if (message.type === BackgroundTasks.AGENT_STOP_GENERATION) {
+    const agent = getAgent();
+    agent.stop();
     sendResponse({ status: ResponseStatus.SUCCESS });
     return true;
   }

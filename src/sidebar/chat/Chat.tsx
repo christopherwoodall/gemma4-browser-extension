@@ -140,6 +140,13 @@ export default function Chat() {
     );
   };
 
+  const onStopGeneration = () => {
+    chrome.runtime.sendMessage({
+      type: BackgroundTasks.AGENT_STOP_GENERATION,
+    });
+    setIsLoading(false);
+  };
+
   return (
     <div className="flex flex-col h-full">
       <div
@@ -228,14 +235,25 @@ export default function Chat() {
               />
             )}
           />
-          <Button
-            type="submit"
-            disabled={isLoading || showCommands}
-            color="primary"
-            variant="solid"
-          >
-            Send
-          </Button>
+          {isLoading ? (
+            <Button
+              type="button"
+              color="danger"
+              variant="solid"
+              onClick={onStopGeneration}
+            >
+              Stop
+            </Button>
+          ) : (
+            <Button
+              type="submit"
+              disabled={showCommands}
+              color="primary"
+              variant="solid"
+            >
+              Send
+            </Button>
+          )}
         </form>
       </div>
     </div>
